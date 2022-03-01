@@ -1,0 +1,124 @@
+---
+title: "3.Fb_words"
+author: "MKwasnicka"
+date: "28 02 2022"
+output: 
+  html_document:
+    code_folding: hide 
+---
+```{r setup, include=FALSE, results='hide', fig.keep='all',  echo=FALSE,message=F,warning=F}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+```{r}
+library(dplyr)
+library(gt)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(stringr)
+library(ggpubr)
+library(purrr)
+library(readxl)
+library(qdapRegex)
+library(tibble)
+library(httr)
+library(rvest)
+library(stringi)
+library(textclean)
+library(tidytext)
+library(wordcloud)
+library(tm)
+
+```
+
+```{r}
+path <- paste0(getwd(), "/fb_messages/messages")
+dirs <- list.dirs(path) %>%  as_tibble()
+names <- c("personnameandsurname")
+
+conversation_files <- names %>%  map_df( function(i) { 
+  person_dirs <- dirs %>%  filter(str_detect(value, i))
+  html_names <- person_dirs %>% map(function(j) {
+    path_to_html <- list.files(j, pattern = ".html", full.names = TRUE) })
+  data.frame(person = i, link = html_names)   })
+```
+
+
+```{r}
+stop_word <- read.delim(paste0(getwd(), "/polish.stopwords.txt"), encoding='UTF-8', header=FALSE) %>%  as.tibble() %>%
+  transmute(word=V1) %>%  bind_rows( data.frame(word=c('xd', 'oj', 'sa', 'ip', 'adres')))
+
+remove_list <- c("Wysłałaś załącznik", "kliknięcie", 'ip', "Ta wiadomość nie została wysłana", "❤")
+
+remover <- function(string){
+for (i in remove_list) {
+  string <- string %>% str_replace(i,"")  }
+string <- string %>%  str_trim()
+return (string) }
+ 
+```
+
+
+
+```{r echo=FALSE}
+plots <- conversation_files$person %>%  unique() %>%  map_df(function(i) {
+  content <- conversation_files %>%  filter(person==i) %>%  pull(value) %>% map_df(function(j) {
+
+####################
+content <- 
+read_html(j) %>% 
+  html_nodes(xpath='//div[@class = "_3-96 _2let"]') %>% 
+  html_text() %>%
+  as.tibble()   #   paste(sep = ' ', collapse = ' ')  %>%   # as.character()
+
+content <- content %>% 
+  transmute(value = rm_url(value, replacement="") %>%  remover()) %>% 
+  mutate(value = gsub(value, pattern = "[0-9]+|[[:punct:]]|\\(.*\\)", replacement = "")) %>% 
+  mutate(value =   str_replace_all(value, "xd+", "") %>%  str_trim() ) %>% 
+    filter(value!='') %>%  drop_empty_row()
+       
+return (content)
+}) %>%  bind_rows()
+  
+  content_single_word <- content %>%  
+  unnest_tokens(word, value) %>% 
+  mutate(word = gsub(word, pattern = "[0-9]+|[[:punct:]]|\\(.*\\)", replacement = "")) %>% 
+  mutate(word =  str_replace_all(word, "xd+", "") %>%  str_trim() ) %>% 
+  mutate(word =  str_replace_all(word, "oo[o]+", "") %>%  str_trim() ) %>% 
+  mutate(word =  str_replace_all(word, "^nie[e]+", "") %>%  str_trim() ) %>% 
+  mutate(word =  str_replace_all(word, "^aa+", "") %>%  str_trim() ) %>% 
+  mutate(word =  str_replace_all(word, "^no+", "") %>%  str_trim() ) %>% 
+  mutate(word =  str_replace_all(word, "^haha+", "") %>%  str_trim() ) %>% 
+  mutate(word =  str_replace_all(word, "^ee+", "") %>%  str_trim() ) %>% 
+
+    filter(word!='') %>%  drop_empty_row() %>% 
+ count(word, sort = TRUE) %>%
+  ungroup() %>% 
+  filter(nchar(word)!=1)
+  
+  
+layout(matrix(c(1, 1), nrow=1), heights=c(8, 8))
+par(mar=rep(0, 4))
+plot.new()
+text(x=0.5, y=0.5, i)
+
+
+content_single_word %>%
+   anti_join(stop_word) %>%
+  arrange(desc(n)) %>% 
+  filter(row_number() <1000) %>% 
+  with(wordcloud(word, n, main='Title')) 
+
+return (content_single_word %>%  anti_join(stop_word) %>%  mutate(person=i))
+})
+```
+
+
+```{r}
+data <- c()
+data$acc <- bind_rows( plots)
+saveRDS(data, "freq_words.rds")
+
+```
+
